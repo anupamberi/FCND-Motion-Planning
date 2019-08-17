@@ -1,5 +1,4 @@
 from enum import Enum
-import math
 from queue import PriorityQueue
 import numpy as np
 from scipy.spatial import Voronoi
@@ -28,7 +27,6 @@ def create_grid(data, drone_altitude, safety_distance):
 
     # Initialize an empty grid
     grid = np.zeros((north_size, east_size))
-    print(north_size, east_size)
     # Populate the grid with obstacles
     for i in range(data.shape[0]):
         north, east, alt, d_north, d_east, d_alt = data[i, :]
@@ -43,7 +41,7 @@ def create_grid(data, drone_altitude, safety_distance):
 
     return grid, int(north_min), int(east_min)
 
-def get_object_centers(data, north_offset, east_offset, drone_altitude, safety_distance):
+def get_obstacle_centers(data, north_offset, east_offset, drone_altitude, safety_distance):
     """
     Returns a list of the obstacle centers.
     """
@@ -52,13 +50,14 @@ def get_object_centers(data, north_offset, east_offset, drone_altitude, safety_d
         north, east, alt, d_north, d_east, d_alt = data[i, :]
         if alt + d_alt + safety_distance > drone_altitude:
             points.append([north - north_offset, east - east_offset])
-    return points;
+    return points
 
-def find_open_edges_voronoi(graph, grid):
+def get_edges(graph, grid):
     """
     Finds open edges from `graph` and `grid`
     """
     edges = []
+
     for v in graph.ridge_vertices:
         p1 = graph.vertices[v[0]]
         p2 = graph.vertices[v[1]]
@@ -100,19 +99,15 @@ def create_graph(data, drone_altitude, safety_distance):
     """
     Returns a graph from the colloders `data`.
     """
-    # Find grid and offsets.
+    # Get grid and offsets.
     grid, north_offset, east_offset = create_grid(data, drone_altitude, safety_distance)
-
-    # Find object centers.
-    centers = get_object_centers(data, north_offset, east_offset, drone_altitude, safety_distance)
-
-    # Create Voronoid from centers
+    # Find obstacle centers.
+    centers = get_obstacle_centers(data, north_offset, east_offset, drone_altitude, safety_distance)
+    # Create Voronoi graph diagram based on obstacle centers
     voronoi = Voronoi(centers)
-
-    # Find open edges
-    edges = find_open_edges_voronoi(voronoi, grid)
-
-    # Create graph.
+    # Compute open edges
+    edges = get_edges(voronoi, grid)
+    # Create graph from edges and return graph and offsets
     return (create_graph_from_edges(edges), north_offset, east_offset)
 
 # Assume all actions cost the same.
@@ -129,10 +124,10 @@ class Action(Enum):
     NORTH = (-1, 0, 1)
     SOUTH = (1, 0, 1)
     # Diagonal Actions
-    NORTH_WEST = (-1, -1, math.sqrt(2))
-    NORTH_EAST = (-1, 1, math.sqrt(2))
-    SOUTH_WEST = (1, -1, math.sqrt(2))
-    SOUTH_EAST = (1, 1, math.sqrt(2))
+    NORTH_WEST = (-1, -1, np.sqrt(2))
+    NORTH_EAST = (-1, 1, np.sqrt(2))
+    SOUTH_WEST = (1, -1, np.sqrt(2))
+    SOUTH_EAST = (1, 1, np.sqrt(2))
 
     @property
     def cost(self):
@@ -162,6 +157,7 @@ def valid_actions(grid, current_node):
         valid_actions.remove(Action.WEST)
     if y + 1 > m or grid[x, y + 1] == 1:
         valid_actions.remove(Action.EAST)
+    # Checks for the new diagonal actions
     if x - 1 < 0 or y + 1 > m or grid[x - 1, y + 1] == 1:
         valid_actions.remove(Action.NORTH_EAST)
     if x + 1 > n or y + 1 > m or grid[x + 1, y + 1] == 1:
@@ -174,7 +170,11 @@ def valid_actions(grid, current_node):
     return valid_actions
 
 
-def a_star(grid, h, start, goal):
+def a_star(grid, heuristic_func, start, goal):
+    """
+    Given a grid and heuristic function returns
+    the lowest cost path from start to goal.
+    """
 
     path = []
     path_cost = 0
@@ -184,32 +184,28 @@ def a_star(grid, h, start, goal):
 
     branch = {}
     found = False
-    
+
     while not queue.empty():
         item = queue.get()
+        current_cost = item[0]
         current_node = item[1]
-        if current_node == start:
-            current_cost = 0.0
-        else:              
-            current_cost = branch[current_node][0]
-            
-        if current_node == goal:        
+
+        if current_node == goal:
             print('Found a path.')
             found = True
             break
         else:
-            for action in valid_actions(grid, current_node):
-                # get the tuple representation
-                da = action.delta
-                next_node = (current_node[0] + da[0], current_node[1] + da[1])
-                branch_cost = current_cost + action.cost
-                queue_cost = branch_cost + h(next_node, goal)
-                
-                if next_node not in visited:                
-                    visited.add(next_node)               
-                    branch[next_node] = (branch_cost, current_node, action)
-                    queue.put((queue_cost, next_node))
-             
+            # Get the new vertexes connected to the current vertex
+            for a in valid_actions(grid, current_node):
+                next_node = (current_node[0] + a.delta[0], current_node[1] + a.delta[1])
+                new_cost = current_cost + a.cost + heuristic_func(next_node, goal)
+
+                if next_node not in visited:
+                    visited.add(next_node)
+                    queue.put((new_cost, next_node))
+
+                    branch[next_node] = (new_cost, current_node, a)
+
     if found:
         # retrace steps
         n = goal
@@ -222,46 +218,46 @@ def a_star(grid, h, start, goal):
     else:
         print('**********************')
         print('Failed to find a path!')
-        print('**********************') 
+        print('**********************')
+
     return path[::-1], path_cost
 
-
-def a_star_graph(graph, h, start, goal):
+def a_star_graph(graph, start, goal):
     """Modified A* to work with NetworkX graphs."""
     path = []
-    path_cost = 0
     queue = PriorityQueue()
     queue.put((0, start))
     visited = set(start)
 
     branch = {}
     found = False
-    
+
     while not queue.empty():
         item = queue.get()
+        current_cost = item[0]
         current_node = item[1]
-        if current_node == start:
-            current_cost = 0.0
-        else:              
-            current_cost = branch[current_node][0]
-            
-        if current_node == goal:        
+
+        if current_node == goal:
             print('Found a path.')
             found = True
             break
         else:
             for next_node in graph[current_node]:
                 cost = graph.edges[current_node, next_node]['weight']
-                branch_cost = current_cost + cost
-                queue_cost = branch_cost + h(next_node, goal)
-                
-                if next_node not in visited:                
+                new_cost = current_cost + cost + heuristic(next_node, goal)
+
+                if next_node not in visited:
                     visited.add(next_node)
-                    branch[next_node] = (branch_cost, current_node)
-                    queue.put((queue_cost, next_node))
-                    
+                    queue.put((new_cost, next_node))
+
+                    branch[next_node] = (new_cost, current_node)
+
+    path = []
+    path_cost = 0
     if found:
+
         # retrace steps
+        path = []
         n = goal
         path_cost = branch[n][0]
         path.append(goal)
@@ -269,10 +265,7 @@ def a_star_graph(graph, h, start, goal):
             path.append(branch[n][1])
             n = branch[n][1]
         path.append(branch[n][1])
-    else:
-        print('**********************')
-        print('Failed to find a path!')
-        print('**********************') 
+
     return path[::-1], path_cost
 
 def heuristic(position, goal_position):
@@ -295,12 +288,19 @@ def closest_point(graph, current_point):
 def point(p):
     return np.array([p[0], p[1], 1.]).reshape(1, -1)
 
-def collinearity_check(p1, p2, p3, epsilon=1e-6):   
+def collinearity_check(p1, p2, p3, epsilon=1e-6):
+    """
+    Checks for collinearity between three points based 
+    on the determinant value
+    """
     m = np.concatenate((p1, p2, p3), 0)
     det = np.linalg.det(m)
     return abs(det) < epsilon
 
-def pruned_path(path):
+def prune_path(path):
+    """
+    Prune the path based on collinearity checks
+    """
     if path is not None:
         pruned_path = [p for p in path]
         # TODO: prune the path!
