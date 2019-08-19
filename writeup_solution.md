@@ -17,7 +17,8 @@ The starter code contains two principal files viz. `motion_planning.py` and `pla
 The motion_planning.py is a modified version of the backyard_flyer_solution.py. 
 The  modifications are as explained below,
 
-####Details of motion_planning.py
+#### Details of motion_planning.py
+
 ***Addition of a new PLANNING state.***
 
 A new PLANNING state is added for computing a 3D path along waypoints from start to goal.
@@ -41,7 +42,7 @@ Its different steps are,
 5. Send the computed waypoints using `self.send_waypoints()` to the drone by using msgpack library for packing the waypoint data and then 
 writing the waypoint data to the drone connection.
 
-####Details of planning_utils.py
+#### Details of planning_utils.py
 
 The planning_utils.py is a utility class with the following methods,
 
@@ -182,7 +183,6 @@ The `prune_path` method is used by the graph based and grid based solutions.
 Here is a capture of the solution.
 
 ![Drone Image](./misc/drone_on_the_way.png)
-### Double check that you've met specifications for each of the [rubric](https://review.udacity.com/#!/rubrics/1534/view) points.
   
 # Extra Challenges: Real World Planning
 
